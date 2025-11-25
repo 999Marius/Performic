@@ -1,10 +1,7 @@
 package com.example.performic
 
-import android.annotation.SuppressLint
-import android.os.Build
-import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
-import androidx.annotation.RequiresApi
+import androidx.appcompat.app.AppCompatActivity
 import com.example.performic.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity() {
@@ -12,8 +9,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var benchmarkManager: BenchmarkManager
 
-    @SuppressLint("DefaultLocale")
-    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -22,26 +17,45 @@ class MainActivity : AppCompatActivity() {
         benchmarkManager = BenchmarkManager(this)
 
         binding.buttonStart.setOnClickListener {
-            binding.textViewResult.text = "Running..."
             binding.buttonStart.isEnabled = false
+            binding.textViewResult.text = "Running Scientific Benchmark...\n"
 
             benchmarkManager.prepareForBenchmark()
 
-            Thread {
-                val result = benchmarkManager.runCoreBenchmark()
+            benchmarkManager.runCoreBenchmarkWithMonitoring { result, thermalHistory ->
 
-                runOnUiThread {
-                    val displayText = if(result.success && result.cpuScore != null){
-                        val formattedScore = String.format("%.2f", result.cpuScore)
-                        "${result.message}\nCPU Score: ${formattedScore}ms"
-                    }else{
-                        result.message
-                    }
-                    binding.textViewResult.text = result.message
-                    benchmarkManager.cleanupAfterBenchmark()
-                    binding.buttonStart.isEnabled = true
+                if (result.success) {
+                    val startTemp = thermalHistory.firstOrNull()?.temperature ?: 0f
+                    val endTemp = thermalHistory.lastOrNull()?.temperature ?: 0f
+                    val heatRise = endTemp - startTemp
+                    val riseSign = if (heatRise >= 0) "+" else ""
+
+
+                    val scScore = result.singleCore ?: 0.0
+                    val mcScore = result.multiCore ?: 0.0
+
+                    val text = """
+                        === BENCHMARK RESULTS ===
+                        (Higher Score is Better)
+                        (Baseline P30 Lite = 1000)
+                        
+                        Single-Core: ${String.format("%.0f", scScore)} Points
+                        Multi-Core:  ${String.format("%.0f", mcScore)} Points
+                        
+                        ----------------------
+                        Thermal Analysis:
+                        Heat Rise: $riseSign${String.format("%.1f", heatRise)}°C
+                        (Start: $startTemp°C -> End: $endTemp°C)
+                    """.trimIndent()
+
+                    binding.textViewResult.text = text
+                } else {
+                    binding.textViewResult.text = "Error: ${result.message}"
                 }
-            }.start()
+
+                benchmarkManager.cleanupAfterBenchmark()
+                binding.buttonStart.isEnabled = true
+            }
         }
     }
 }

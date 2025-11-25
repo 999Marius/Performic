@@ -1,8 +1,9 @@
 package com.example.performic
 
-data class BenchmarkResult (
+data class BenchmarkResult(
     val success: Boolean,
     val message: String,
-    val cpuScore: Double? = null
+    val singleCore: Double? = null,
+    val multiCore: Double? = null
 )
 
