@@ -18,7 +18,7 @@ public:
     Scores runFullSuite();
 
 private:
-    static constexpr int NUM_ITERATIONS = 20;
+    static constexpr int NUM_ITERATIONS = 1;
     static constexpr int COMPRESSION_SIZE = 1000000;
     static constexpr int MATRIX_SIZE = 300;
     static constexpr int INT_ARRAY_SIZE = 25000000;

@@ -1,61 +1,184 @@
 package com.example.performic
 
+import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
+import android.view.SurfaceHolder
+import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import com.example.performic.databinding.ActivityMainBinding
+import com.example.performic.record.ThermalPoint
+import com.github.mikephil.charting.charts.LineChart
+import com.github.mikephil.charting.data.Entry
+import com.github.mikephil.charting.data.LineData
+import com.github.mikephil.charting.data.LineDataSet
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var benchmarkManager: BenchmarkManager
+    private var gpuCallback: SurfaceHolder.Callback? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // IMPORTANT: We REMOVED all "setZOrderMediaOverlay" and "setFormat" code.
+        // With the new split layout, we don't need those hacks anymore.
+        // The SurfaceView is now a standard opaque view sitting below the FPS bar.
+        binding.surfaceViewGpu.setZOrderOnTop(true)
+        binding.surfaceViewGpu.holder.setFormat(android.graphics.PixelFormat.OPAQUE)
         benchmarkManager = BenchmarkManager(this)
 
-        binding.buttonStart.setOnClickListener {
-            binding.buttonStart.isEnabled = false
-            binding.textViewResult.text = "Running Scientific Benchmark...\n"
+        binding.textDeviceName.text = "${Build.MANUFACTURER} ${Build.MODEL}".uppercase()
 
-            benchmarkManager.prepareForBenchmark()
+        binding.buttonStart.setOnClickListener { startBenchmark() }
+        binding.buttonClose.setOnClickListener { resetUi() }
 
-            benchmarkManager.runCoreBenchmarkWithMonitoring { result, thermalHistory ->
+        resetUi()
+    }
 
-                if (result.success) {
-                    val startTemp = thermalHistory.firstOrNull()?.temperature ?: 0f
-                    val endTemp = thermalHistory.lastOrNull()?.temperature ?: 0f
-                    val heatRise = endTemp - startTemp
-                    val riseSign = if (heatRise >= 0) "+" else ""
+    private fun startBenchmark() {
+        binding.layoutStart.visibility = View.GONE
+        binding.layoutProgress.visibility = View.VISIBLE
+        binding.textProgressStatus.text = "Benchmarking CPU & Memory..."
 
+        benchmarkManager.prepareForBenchmark()
 
-                    val scScore = result.singleCore ?: 0.0
-                    val mcScore = result.multiCore ?: 0.0
-
-                    val text = """
-                        === BENCHMARK RESULTS ===
-                        (Higher Score is Better)
-                        (Baseline P30 Lite = 1000)
-                        
-                        Single-Core: ${String.format("%.0f", scScore)} Points
-                        Multi-Core:  ${String.format("%.0f", mcScore)} Points
-                        
-                        ----------------------
-                        Thermal Analysis:
-                        Heat Rise: $riseSign${String.format("%.1f", heatRise)}°C
-                        (Start: $startTemp°C -> End: $endTemp°C)
-                    """.trimIndent()
-
-                    binding.textViewResult.text = text
+        benchmarkManager.runCoreBenchmarkWithMonitoring { cpuResult, thermalHistory ->
+            runOnUiThread {
+                if (cpuResult.success) {
+                    runGpuTest(cpuResult, thermalHistory)
                 } else {
-                    binding.textViewResult.text = "Error: ${result.message}"
+                    binding.textProgressStatus.text = "Error: ${cpuResult.message}"
                 }
-
-                benchmarkManager.cleanupAfterBenchmark()
-                binding.buttonStart.isEnabled = true
             }
+        }
+    }
+
+    private fun runGpuTest(cpuResult: BenchmarkResult, thermalHistory: List<ThermalPoint>) {
+        // Switch screens
+        binding.layoutStart.visibility = View.GONE
+        binding.layoutProgress.visibility = View.GONE
+        binding.layoutResults.visibility = View.GONE
+
+        // Show the new Split Layout (Header Bar + Surface)
+        binding.layoutGpuRender.visibility = View.VISIBLE
+        binding.surfaceViewGpu.visibility = View.VISIBLE
+
+        binding.textLiveFps.text = "FPS: --"
+
+        benchmarkManager.fpsListener = object : BenchmarkManager.FpsCallback {
+            override fun onFpsUpdate(fps: Int) {
+                runOnUiThread { binding.textLiveFps.text = "FPS: $fps" }
+            }
+        }
+
+        if (gpuCallback != null) {
+            binding.surfaceViewGpu.holder.removeCallback(gpuCallback)
+        }
+
+        gpuCallback = object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+                Thread {
+                    try {
+                        val gpuScore = benchmarkManager.runGpuTest(holder.surface)
+                        runOnUiThread {
+                            benchmarkManager.cleanupAfterBenchmark()
+                            showResults(cpuResult, gpuScore, thermalHistory)
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        runOnUiThread { resetUi() }
+                    }
+                }.start()
+            }
+            override fun surfaceChanged(h: SurfaceHolder, format: Int, w: Int, ht: Int) {}
+            override fun surfaceDestroyed(h: SurfaceHolder) {}
+        }
+
+        binding.surfaceViewGpu.holder.addCallback(gpuCallback)
+
+        if (binding.surfaceViewGpu.holder.surface.isValid) {
+            gpuCallback?.surfaceCreated(binding.surfaceViewGpu.holder)
+        }
+    }
+
+    private fun showResults(cpu: BenchmarkResult, gpu: Double, thermal: List<ThermalPoint>) {
+        if (gpuCallback != null) {
+            binding.surfaceViewGpu.holder.removeCallback(gpuCallback)
+            gpuCallback = null
+        }
+
+        binding.layoutGpuRender.visibility = View.GONE
+        binding.surfaceViewGpu.visibility = View.GONE
+
+        binding.layoutResults.visibility = View.VISIBLE
+
+        fun d(v: Double?) = v ?: 0.0
+
+        binding.resCpuSingle.text = "%.0f".format(d(cpu.singleCore))
+        binding.resCpuMulti.text = "%.0f".format(d(cpu.multiCore))
+        binding.resMemScore.text = "%.0f".format(d(cpu.ramScore))
+        binding.resMemBandwidth.text = "%.2f GB/s".format(d(cpu.ramGBs))
+        binding.resL1.text = "%.2f GB/s".format(d(cpu.l1GBs))
+        binding.resL2.text = "%.2f GB/s".format(d(cpu.l2GBs))
+        binding.resGpuScore.text = "%.0f".format(gpu)
+
+        binding.progCpuSingle.progress = ((d(cpu.singleCore) / 2000.0) * 100).toInt().coerceIn(0, 100)
+        binding.progCpuMulti.progress = ((d(cpu.multiCore) / 10000.0) * 100).toInt().coerceIn(0, 100)
+        binding.progGpu.progress = ((gpu / 5000.0) * 100).toInt().coerceIn(0, 100)
+
+        val startTemp = thermal.firstOrNull()?.temperature ?: 0f
+        val endTemp = thermal.lastOrNull()?.temperature ?: 0f
+        binding.resTempStart.text = "%.1f°".format(startTemp)
+        binding.resTempPeak.text = "%.1f°".format(endTemp)
+        binding.resTempRise.text = "+%.1f°".format(endTemp - startTemp)
+
+        try {
+            val cpuData = if (cpu.singleCoreHistory.isNotEmpty()) cpu.singleCoreHistory else listOf(d(cpu.singleCore))
+            setupChart(binding.chartCpu, cpuData, "CPU Stability", "#00E5FF")
+
+            val tempData = thermal.map { it.temperature.toDouble() }
+            setupChart(binding.chartThermal, tempData, "Thermals", "#FF5252")
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    private fun resetUi() {
+        if (gpuCallback != null) {
+            binding.surfaceViewGpu.holder.removeCallback(gpuCallback)
+            gpuCallback = null
+        }
+
+        binding.layoutResults.visibility = View.GONE
+        binding.layoutProgress.visibility = View.GONE
+        binding.layoutGpuRender.visibility = View.GONE
+        binding.layoutStart.visibility = View.VISIBLE
+    }
+
+    private fun setupChart(chart: LineChart, dataValues: List<Double>, label: String, colorHex: String) {
+        if (dataValues.isEmpty()) return
+        val color = Color.parseColor(colorHex)
+        val entries = dataValues.mapIndexed { index, value -> Entry(index.toFloat(), value.toFloat()) }
+        val dataSet = LineDataSet(entries, label).apply {
+            this.color = color
+            setDrawCircles(false)
+            setDrawValues(false)
+            lineWidth = 2f
+            mode = LineDataSet.Mode.CUBIC_BEZIER
+            setDrawFilled(true)
+            fillColor = color
+            fillAlpha = 50
+        }
+        chart.apply {
+            data = LineData(dataSet)
+            description.isEnabled = false
+            legend.textColor = Color.WHITE
+            xAxis.textColor = Color.GRAY
+            axisLeft.textColor = Color.GRAY
+            axisRight.isEnabled = false
+            invalidate()
         }
     }
 }

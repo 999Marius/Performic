@@ -6,7 +6,7 @@
 #include <string>
 #include <sstream> // <--- REQUIRED for the fix
 #include "cpu_benchmark/CpuBenchmark.h"
-
+#include "memoty_benchmark/MemoryBenchmark.h"
 #define LOG_TAG "PerformicCore"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
@@ -36,13 +36,21 @@ std::string BenchmarkCore::runFullBenchmark() {
 
     CpuBenchmark::Scores results = cpu_test.runFullSuite();
 
+    MemoryBenchmark mem_test;
+    MemoryBenchmark::MemoryScores memResults = mem_test.runMemorySuite();
+
     std::stringstream ss;
     ss << "{";
     ss << "\"success\":true, ";
     ss << "\"message\":\"Benchmark complete!\", ";
 
     ss << "\"singleCore\":" << results.singleCoreScore << ", ";
-    ss << "\"multiCore\":" << results.multiCoreScore;
+    ss << "\"multiCore\":" << results.multiCoreScore << ", ";
+
+    ss << "\"ramScore\":" << memResults.memoryScore << ", ";
+    ss << "\"ramGBs\":" << memResults.ramThroughput << ", ";
+    ss << "\"l1GBs\":"    << memResults.l1Throughput << ", ";
+    ss << "\"l2GBs\":"    << memResults.l2Throughput;
     ss << "}";
 
     std::string json_result = ss.str();
