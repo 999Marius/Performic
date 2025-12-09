@@ -19,16 +19,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var benchmarkManager: BenchmarkManager
     private var gpuCallback: SurfaceHolder.Callback? = null
 
+    // Holds the LIVE FPS data from the GPU test
+    private val gpuFpsHistory = ArrayList<Double>()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // IMPORTANT: We REMOVED all "setZOrderMediaOverlay" and "setFormat" code.
-        // With the new split layout, we don't need those hacks anymore.
-        // The SurfaceView is now a standard opaque view sitting below the FPS bar.
+        supportActionBar?.hide()
+
         binding.surfaceViewGpu.setZOrderOnTop(true)
         binding.surfaceViewGpu.holder.setFormat(android.graphics.PixelFormat.OPAQUE)
+
         benchmarkManager = BenchmarkManager(this)
 
         binding.textDeviceName.text = "${Build.MANUFACTURER} ${Build.MODEL}".uppercase()
@@ -46,9 +49,11 @@ class MainActivity : AppCompatActivity() {
 
         benchmarkManager.prepareForBenchmark()
 
+        // RUN CPU TEST
         benchmarkManager.runCoreBenchmarkWithMonitoring { cpuResult, thermalHistory ->
             runOnUiThread {
                 if (cpuResult.success) {
+                    // CPU Done -> Start GPU Test
                     runGpuTest(cpuResult, thermalHistory)
                 } else {
                     binding.textProgressStatus.text = "Error: ${cpuResult.message}"
@@ -58,26 +63,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun runGpuTest(cpuResult: BenchmarkResult, thermalHistory: List<ThermalPoint>) {
-        // Switch screens
         binding.layoutStart.visibility = View.GONE
         binding.layoutProgress.visibility = View.GONE
         binding.layoutResults.visibility = View.GONE
-
-        // Show the new Split Layout (Header Bar + Surface)
         binding.layoutGpuRender.visibility = View.VISIBLE
         binding.surfaceViewGpu.visibility = View.VISIBLE
 
         binding.textLiveFps.text = "FPS: --"
+        gpuFpsHistory.clear() // Clear old data
 
         benchmarkManager.fpsListener = object : BenchmarkManager.FpsCallback {
             override fun onFpsUpdate(fps: Int) {
-                runOnUiThread { binding.textLiveFps.text = "FPS: $fps" }
+                runOnUiThread {
+                    binding.textLiveFps.text = "$fps FPS"
+                    // Capture REAL GPU data for the graph
+                    if (fps > 0) gpuFpsHistory.add(fps.toDouble())
+                }
             }
         }
 
-        if (gpuCallback != null) {
-            binding.surfaceViewGpu.holder.removeCallback(gpuCallback)
-        }
+        if (gpuCallback != null) binding.surfaceViewGpu.holder.removeCallback(gpuCallback)
 
         gpuCallback = object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
@@ -86,6 +91,7 @@ class MainActivity : AppCompatActivity() {
                         val gpuScore = benchmarkManager.runGpuTest(holder.surface)
                         runOnUiThread {
                             benchmarkManager.cleanupAfterBenchmark()
+                            // TEST COMPLETE: Show all graphs
                             showResults(cpuResult, gpuScore, thermalHistory)
                         }
                     } catch (e: Exception) {
@@ -97,27 +103,24 @@ class MainActivity : AppCompatActivity() {
             override fun surfaceChanged(h: SurfaceHolder, format: Int, w: Int, ht: Int) {}
             override fun surfaceDestroyed(h: SurfaceHolder) {}
         }
-
         binding.surfaceViewGpu.holder.addCallback(gpuCallback)
-
-        if (binding.surfaceViewGpu.holder.surface.isValid) {
-            gpuCallback?.surfaceCreated(binding.surfaceViewGpu.holder)
-        }
+        if (binding.surfaceViewGpu.holder.surface.isValid) gpuCallback?.surfaceCreated(binding.surfaceViewGpu.holder)
     }
 
     private fun showResults(cpu: BenchmarkResult, gpu: Double, thermal: List<ThermalPoint>) {
+        binding.rootContainer.setBackgroundColor(Color.parseColor("#121212"))
+
         if (gpuCallback != null) {
             binding.surfaceViewGpu.holder.removeCallback(gpuCallback)
             gpuCallback = null
         }
-
         binding.layoutGpuRender.visibility = View.GONE
         binding.surfaceViewGpu.visibility = View.GONE
-
         binding.layoutResults.visibility = View.VISIBLE
 
         fun d(v: Double?) = v ?: 0.0
 
+        // 1. SET TEXT SCORES
         binding.resCpuSingle.text = "%.0f".format(d(cpu.singleCore))
         binding.resCpuMulti.text = "%.0f".format(d(cpu.multiCore))
         binding.resMemScore.text = "%.0f".format(d(cpu.ramScore))
@@ -126,22 +129,36 @@ class MainActivity : AppCompatActivity() {
         binding.resL2.text = "%.2f GB/s".format(d(cpu.l2GBs))
         binding.resGpuScore.text = "%.0f".format(gpu)
 
+        // 2. SET PROGRESS BARS
         binding.progCpuSingle.progress = ((d(cpu.singleCore) / 2000.0) * 100).toInt().coerceIn(0, 100)
         binding.progCpuMulti.progress = ((d(cpu.multiCore) / 10000.0) * 100).toInt().coerceIn(0, 100)
         binding.progGpu.progress = ((gpu / 5000.0) * 100).toInt().coerceIn(0, 100)
 
+        // 3. SET THERMAL TEXT
         val startTemp = thermal.firstOrNull()?.temperature ?: 0f
         val endTemp = thermal.lastOrNull()?.temperature ?: 0f
         binding.resTempStart.text = "%.1f°".format(startTemp)
         binding.resTempPeak.text = "%.1f°".format(endTemp)
         binding.resTempRise.text = "+%.1f°".format(endTemp - startTemp)
 
+        // 4. SETUP GRAPHS (The Important Part)
         try {
-            val cpuData = if (cpu.singleCoreHistory.isNotEmpty()) cpu.singleCoreHistory else listOf(d(cpu.singleCore))
-            setupChart(binding.chartCpu, cpuData, "CPU Stability", "#00E5FF")
+            // A. Single Core Graph (Using REAL data from C++)
+            val singleData = if (cpu.singleCoreHistory.isNotEmpty()) cpu.singleCoreHistory else listOf(d(cpu.singleCore))
+            setupChart(binding.chartCpu, singleData, "Single-Core Stability", "#00E5FF")
 
+            // B. Multi Core Graph (Using REAL data from C++)
+            val multiData = if (cpu.multiCoreHistory.isNotEmpty()) cpu.multiCoreHistory else listOf(d(cpu.multiCore))
+            setupChart(binding.chartCpuMulti, multiData, "Multi-Core Stability", "#AA00FF")
+
+            // C. GPU FPS Graph (Using REAL captured FPS)
+            val fpsData = if (gpuFpsHistory.isNotEmpty()) gpuFpsHistory else listOf(gpu / 100.0)
+            setupChart(binding.chartGpuFps, fpsData, "GPU FPS", "#00E676")
+
+            // D. Thermal Graph (Using REAL sensor data)
             val tempData = thermal.map { it.temperature.toDouble() }
-            setupChart(binding.chartThermal, tempData, "Thermals", "#FF5252")
+            setupChart(binding.chartThermal, tempData, "Temperature (°C)", "#FF5252")
+
         } catch (e: Exception) { e.printStackTrace() }
     }
 
@@ -150,7 +167,6 @@ class MainActivity : AppCompatActivity() {
             binding.surfaceViewGpu.holder.removeCallback(gpuCallback)
             gpuCallback = null
         }
-
         binding.layoutResults.visibility = View.GONE
         binding.layoutProgress.visibility = View.GONE
         binding.layoutGpuRender.visibility = View.GONE
@@ -161,23 +177,39 @@ class MainActivity : AppCompatActivity() {
         if (dataValues.isEmpty()) return
         val color = Color.parseColor(colorHex)
         val entries = dataValues.mapIndexed { index, value -> Entry(index.toFloat(), value.toFloat()) }
+
         val dataSet = LineDataSet(entries, label).apply {
             this.color = color
-            setDrawCircles(false)
-            setDrawValues(false)
+            setDrawCircles(true)      // Show points
+            setDrawCircleHole(false)
+            setCircleColor(color)
+            circleRadius = 3f         // Small dots
+
+            setDrawValues(false)      // Hide text numbers on graph (too messy with many points)
+
             lineWidth = 2f
-            mode = LineDataSet.Mode.CUBIC_BEZIER
+            mode = LineDataSet.Mode.CUBIC_BEZIER // Smooth curves
             setDrawFilled(true)
             fillColor = color
             fillAlpha = 50
         }
+
         chart.apply {
             data = LineData(dataSet)
             description.isEnabled = false
             legend.textColor = Color.WHITE
+
             xAxis.textColor = Color.GRAY
+            xAxis.setDrawGridLines(false)
+
             axisLeft.textColor = Color.GRAY
-            axisRight.isEnabled = false
+            axisLeft.setDrawGridLines(true)
+            axisLeft.gridColor = Color.parseColor("#333333")
+
+            axisRight.isEnabled = false // Hide right axis
+
+            // Auto-scale axis to fit the "jitter"
+            isScaleYEnabled = false
             invalidate()
         }
     }

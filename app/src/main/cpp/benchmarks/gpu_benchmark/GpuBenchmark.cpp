@@ -104,8 +104,44 @@ double GpuBenchmark::run(ANativeWindow* window, JNIEnv* env, jobject callbackObj
 
     LOGD("Uniform locations - uTime: %d, uResolution: %d", timeLoc, resLoc);
 
+    // =========================================================
+    // 1. WARM-UP PHASE (The Addition)
+    // =========================================================
+    // We run the render loop for 2.0 seconds but DO NOT count the frames.
+    // This forces the GPU to wake up from idle clocks (e.g., 300MHz) to Max (e.g., 800MHz).
+
+    LOGD("Starting GPU Warm-up (2000ms)...");
+    auto warmStart = std::chrono::high_resolution_clock::now();
+    double warmElapsedMs = 0;
+
+    while (warmElapsedMs < 5000.0) { // 2 seconds warm-up
+        auto now = std::chrono::high_resolution_clock::now();
+        warmElapsedMs = std::chrono::duration<double, std::milli>(now - warmStart).count();
+
+        // Perform the exact same rendering work
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        glUniform1f(timeLoc, (float)warmElapsedMs / 1000.0f);
+        glUniform2f(resLoc, (float)width, (float)height);
+
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        eglSwapBuffers(display, surface);
+
+        // Note: We deliberately do NOT call the Java callback here to keep UI clean
+    }
+    LOGD("GPU Warm-up complete. Starting Measurement.");
+
+
+    // =========================================================
+    // 2. REAL BENCHMARK PHASE
+    // =========================================================
+    // RESET all counters. We act as if the app just started *now*.
+
     int frameCount = 0;
     int fpsFrameCount = 0;
+
+    // Reset the clock!
     auto start = std::chrono::high_resolution_clock::now();
     auto lastFpsTime = start;
     double elapsedMs = 0;
@@ -130,8 +166,8 @@ double GpuBenchmark::run(ANativeWindow* window, JNIEnv* env, jobject callbackObj
 
         if (loopTime >= 1000.0) {
             int currentFps = (int)(fpsFrameCount / (loopTime / 1000.0));
+            // Send FPS to Kotlin UI
             env->CallVoidMethod(callbackObj, methodId, currentFps);
-            //LOGD("FPS: %d", currentFps);
             fpsFrameCount = 0;
             lastFpsTime = now;
         }

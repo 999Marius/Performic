@@ -7,118 +7,137 @@
 #include <thread>
 #include <algorithm>
 #include <android/log.h>
+#include <numeric>
+
 #define LOG_TAG "PerformicCPU"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 
-constexpr int MANDELBROT_SIZE = 400;
-constexpr int MANDELBROT_ITER = 4000;
+// Constants for workloads
+constexpr int MANDELBROT_SIZE = 500;
+constexpr int MANDELBROT_ITER = 5000;
+
 
 CpuBenchmark::Scores CpuBenchmark::runFullSuite() {
-    LOGD("--- STARTING FINAL CALIBRATED SUITE ---");
-
-    // 1. Float
-    double floatTotalTime = 0;
-    for (int i = 0; i < NUM_ITERATIONS; ++i) {
-        auto start = std::chrono::high_resolution_clock::now();
-        ClobberMemory();
-        float res = performMatrixMultiplication();
-        ClobberMemory();
-        auto end = std::chrono::high_resolution_clock::now();
-        DoNotOptimize(res);
-        floatTotalTime += std::chrono::duration<double, std::milli>(end - start).count();
+    for (int i = 0; i < WARMUP_ITERATIONS; ++i){
+        float resF = performMatrixMultiplication(); DoNotOptimize(resF);
+        long resI = performIntegerWorkload();       DoNotOptimize(resI);
+        bool resL = performLUDecomposition();       DoNotOptimize(resL);
+        double resC = performDataCompression();     DoNotOptimize(resC);
     }
-    double floatAvg = floatTotalTime / NUM_ITERATIONS;
+    LOGD("--- STARTING REALTIME STABILITY SUITE ---");
 
-    // 2. Integer
-    double intTotalTime = 0;
-    for (int i = 0; i < NUM_ITERATIONS; ++i) {
-        auto start = std::chrono::high_resolution_clock::now();
-        ClobberMemory();
-        long res = performIntegerWorkload();
-        ClobberMemory();
-        auto end = std::chrono::high_resolution_clock::now();
-        DoNotOptimize(res);
-        intTotalTime += std::chrono::duration<double, std::milli>(end - start).count();
-    }
-    double intAvg = intTotalTime / NUM_ITERATIONS;
-
-    // 3. LU Decomp
-    double luTotalTime = 0;
-    for (int i = 0; i < NUM_ITERATIONS; ++i) {
-        auto start = std::chrono::high_resolution_clock::now();
-        ClobberMemory();
-        bool res = performLUDecomposition();
-        ClobberMemory();
-        auto end = std::chrono::high_resolution_clock::now();
-        DoNotOptimize(res);
-        luTotalTime += std::chrono::duration<double, std::milli>(end - start).count();
-    }
-    double luAvg = luTotalTime / NUM_ITERATIONS;
-
-    // 4. Compression
-    double compressTotalTime = 0;
-    for (int i = 0; i < NUM_ITERATIONS; ++i) {
-        auto start = std::chrono::high_resolution_clock::now();
-        ClobberMemory();
-        double res = performDataCompression();
-        ClobberMemory();
-        auto end = std::chrono::high_resolution_clock::now();
-        DoNotOptimize(res);
-        compressTotalTime += std::chrono::duration<double, std::milli>(end - start).count();
-    }
-    double compressAvg = compressTotalTime / NUM_ITERATIONS;
-
-
-
+    std::vector<double> singleHistory;
+    std::vector<double> multiHistory;
 
     double refFloat = 600.0;
     double refInt = 647.0;
-    double refLu = 955.0;
+    double refLu =  955.0;
     double refCompress = 128.0;
 
-    double r1 = refFloat / std::max(floatAvg, 0.001);
-    double r2 = refInt / std::max(intAvg, 0.001);
-    double r3 = refLu / std::max(luAvg, 0.001);
-    double r4 = refCompress / std::max(compressAvg, 0.001);
+    for (int i = 0; i < STABILITY_ITERATIONS; ++i) {
+        // --- A. Float ---
+        auto startF = std::chrono::high_resolution_clock::now();
+        ClobberMemory();
+        float resF = performMatrixMultiplication();
+        DoNotOptimize(resF);
+        auto endF = std::chrono::high_resolution_clock::now();
+        double timeF = std::chrono::duration<double, std::milli>(endF - startF).count();
 
-    double geoMean = std::pow(r1 * r2 * r3 * r4, 0.25);
-    double singleCoreScore = geoMean * 1000.0;
+        // --- B. Integer ---
+        auto startI = std::chrono::high_resolution_clock::now();
+        ClobberMemory();
+        long resI = performIntegerWorkload();
+        DoNotOptimize(resI);
+        auto endI = std::chrono::high_resolution_clock::now();
+        double timeI = std::chrono::duration<double, std::milli>(endI - startI).count();
+
+        // --- C. LU Decomp ---
+        auto startL = std::chrono::high_resolution_clock::now();
+        ClobberMemory();
+        bool resL = performLUDecomposition();
+        DoNotOptimize(resL);
+        auto endL = std::chrono::high_resolution_clock::now();
+        double timeL = std::chrono::duration<double, std::milli>(endL - startL).count();
+
+        // --- D. Compression ---
+        auto startC = std::chrono::high_resolution_clock::now();
+        ClobberMemory();
+        double resC = performDataCompression();
+        DoNotOptimize(resC);
+        auto endC = std::chrono::high_resolution_clock::now();
+        double timeC = std::chrono::duration<double, std::milli>(endC - startC).count();
+
+        // --- Calculate Score for this Iteration ---
+        // Avoid division by zero
+        double r1 = refFloat / std::max(timeF, 0.001);
+        double r2 = refInt / std::max(timeI, 0.001);
+        double r3 = refLu / std::max(timeL, 0.001);
+        double r4 = refCompress / std::max(timeC, 0.001);
+
+        // Geometric Mean of the 4 tests
+        double iterGeoMean = std::pow(r1 * r2 * r3 * r4, 0.25);
+        double iterScore = iterGeoMean * 1000.0; // Scale to nice number
+
+        singleHistory.push_back(iterScore);
+
+        // Optional: Small sleep to allow thermal regulation to update slightly?
+        // usually not needed if workloads are heavy enough.
+    }
+
+    // Final Single Score = Average of the history
+    double avgSingleScore = 0.0;
+    if (!singleHistory.empty()) {
+        double sum = std::accumulate(singleHistory.begin(), singleHistory.end(), 0.0);
+        avgSingleScore = sum / singleHistory.size();
+    }
 
 
-//multi core bench
+    // ==========================================
+    // 2. MULTI CORE STABILITY LOOP
+    // ==========================================
     unsigned int numCores = std::thread::hardware_concurrency();
     if (numCores == 0) numCores = 4;
 
-    double multiCoreTotalTime = 0;
-    int multiIterations = 50;
+    double refMulti = 14395.0; // Reference time for 1 multi-core iteration
 
-    for (int iter = 0; iter < multiIterations; ++iter) {
+    for (int iter = 0; iter < STABILITY_ITERATIONS; ++iter) {
         auto start = std::chrono::high_resolution_clock::now();
+
         std::vector<std::thread> threads;
         threads.reserve(numCores);
         for (unsigned int i = 0; i < numCores; ++i) {
             threads.emplace_back(&CpuBenchmark::runThreadedWorkload, this);
         }
         for (auto& t : threads) { if (t.joinable()) t.join(); }
+
         auto end = std::chrono::high_resolution_clock::now();
-        multiCoreTotalTime += std::chrono::duration<double, std::milli>(end - start).count();
+        double timeMulti = std::chrono::duration<double, std::milli>(end - start).count();
+
+        // Calculate Score
+        double rMulti = refMulti / std::max(timeMulti, 0.001);
+        double iterScore = rMulti * 1000.0;
+
+        multiHistory.push_back(iterScore);
     }
 
-    double multiAvg = multiCoreTotalTime / multiIterations;
+    double avgMultiScore = 0.0;
+    if (!multiHistory.empty()) {
+        double sum = std::accumulate(multiHistory.begin(), multiHistory.end(), 0.0);
+        avgMultiScore = sum / multiHistory.size();
+    }
 
-    double refMulti = 11516.0;
-
-    double rMulti = refMulti / std::max(multiAvg, 0.001);
-    double multiCoreScore = rMulti * 1000.0;
-
-    return {singleCoreScore, multiCoreScore};
+    // Return the struct with vectors filled
+    return {avgSingleScore, avgMultiScore, singleHistory, multiHistory};
 }
+
+// ---------------------------------------------------------
+// WORKLOAD FUNCTIONS (UNCHANGED)
+// ---------------------------------------------------------
 
 void CpuBenchmark::runThreadedWorkload() {
     double res = performMandelbrot();
     DoNotOptimize(res);
 }
-
 
 float CpuBenchmark::performMatrixMultiplication() {
     int size = MATRIX_SIZE;
@@ -222,7 +241,6 @@ double CpuBenchmark::performDataCompression() {
         output[outIdx++] = count;
         output[outIdx++] = input[i];
     }
-
     return (double)outIdx;
 }
 

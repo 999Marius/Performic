@@ -15,18 +15,15 @@ import com.example.performic.record.ThermalPoint
 import com.google.gson.Gson
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.random.Random
 
 class BenchmarkManager(private val context: Context) {
 
     // =========================================================================
-    // NATIVE INTERFACE (Matches your C++ exactly)
+    // NATIVE INTERFACE
     // =========================================================================
 
-    // The "All-in-One" CPU/RAM benchmark
+    // C++ returns a JSON string containing the scores AND the real history arrays
     private external fun runNativeBenchmark(): String
-
-    // The GPU benchmark
     private external fun runGpuBenchmark(surface: android.view.Surface): Double
 
     companion object {
@@ -44,7 +41,6 @@ class BenchmarkManager(private val context: Context) {
     }
     var fpsListener: FpsCallback? = null
 
-    // Called from JNI (if your C++ supports it) or ignored if not
     fun onFpsUpdate(fps: Int) {
         fpsListener?.onFpsUpdate(fps)
     }
@@ -74,7 +70,7 @@ class BenchmarkManager(private val context: Context) {
                 val currentTemp = getCurrentBatteryTemp()
                 thermalHistory.add(ThermalPoint(currentMs, currentTemp))
                 try {
-                    Thread.sleep(1000)
+                    Thread.sleep(500) // 0.5s intervals for better resolution
                 } catch (e: InterruptedException) {
                     break
                 }
@@ -86,31 +82,26 @@ class BenchmarkManager(private val context: Context) {
             Log.d("Performic", "Native Benchmark Started.")
             monitoringThread.start()
 
-            // --- CALL THE NATIVE METHOD (This blocks until done) ---
+            // --- CALL C++ (BLOCKING) ---
+            // C++ runs the loop (20x), collects REAL data, and returns JSON
             val jsonResultFromCpp = runNativeBenchmark()
-            // -------------------------------------------------------
+            // ---------------------------
 
             isBenchmarkRunning.set(false) // Stop monitor
             try { monitoringThread.join() } catch (e: Exception) {}
 
             Log.d("Performic", "Raw JSON: $jsonResultFromCpp")
 
-            // Parse the JSON
-            var result = try {
+            // Parse the JSON directly into the Result object
+            // The JSON already contains "singleCoreHistory": [100, 102, 98...]
+            val result = try {
                 Gson().fromJson(jsonResultFromCpp, BenchmarkResult::class.java)
             } catch (e: Exception) {
                 BenchmarkResult(false, "JSON Parsing Error: ${e.message}")
             }
 
-            // --- GENERATE GRAPH DATA ---
-            // Since C++ ran everything in one go, we generate the "History" curves
-            // based on the final score to ensure the UI graphs have data to draw.
-            if (result.success) {
-                result = result.copy(
-                    singleCoreHistory = generateStabilityCurve(result.singleCore ?: 0.0),
-                    multiCoreHistory = generateStabilityCurve(result.multiCore ?: 0.0)
-                )
-            }
+            // --- REMOVED THE FAKE GENERATOR HERE ---
+            // We now use the 'result' exactly as it came from C++
 
             // Return to UI
             Handler(Looper.getMainLooper()).post {
@@ -123,24 +114,6 @@ class BenchmarkManager(private val context: Context) {
 
     fun runGpuTest(surface: android.view.Surface): Double {
         return runGpuBenchmark(surface)
-    }
-
-    // =========================================================================
-    // HELPER: SIMULATE STABILITY CURVE
-    // =========================================================================
-    // Creates a realistic looking "jitter" curve around the score for the graph
-    private fun generateStabilityCurve(baseScore: Double): List<Double> {
-        val list = ArrayList<Double>()
-        if (baseScore == 0.0) return list
-
-        // Generate 10 points
-        repeat(10) {
-            // Random variation of +/- 2%
-            val variance = (Random.nextDouble() * 0.04) - 0.02
-            val point = baseScore * (1.0 + variance)
-            list.add(point)
-        }
-        return list
     }
 
     // =========================================================================

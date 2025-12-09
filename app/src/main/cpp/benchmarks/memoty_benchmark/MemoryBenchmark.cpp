@@ -14,8 +14,8 @@ constexpr int SIZE_L1  = 32 * 1024;        // 32 KB (Fits in L1)
 constexpr int SIZE_L2  = 512 * 1024;       // 512 KB (Fits in L2/L3)
 constexpr int SIZE_RAM = 64 * 1024 * 1024; // 64 MB (Forces RAM access)
 
-constexpr int ITERATIONS_CACHE = 5000; // Run many times because cache is fast
-constexpr int ITERATIONS_RAM   = 50;   // Run fewer times because RAM is slow
+constexpr int ITERATIONS_CACHE = 50000; // Run many times because cache is fast
+constexpr int ITERATIONS_RAM   = 500;   // Run fewer times because RAM is slow
 
 MemoryBenchmark::MemoryScores MemoryBenchmark::runMemorySuite() {
     LOGD("--- STARTING MEMORY BENCHMARK ---");
