@@ -41,10 +41,6 @@ static std::string vectorToJsonArray(const std::vector<double>& vec) {
 std::string BenchmarkCore::runFullBenchmark() {
     LOGI("BenchmarkCore: Starting full benchmark.");
 
-    if (!isDeviceCoolEnough()) {
-        LOGI("WARNING: Device is hot. Performance may be throttled.");
-    }
-
     // 1. Run CPU Suite (Returns Scores + History Vectors)
     CpuBenchmark cpu_test;
     CpuBenchmark::Scores results = cpu_test.runFullSuite();
@@ -79,33 +75,4 @@ std::string BenchmarkCore::runFullBenchmark() {
     // LOGI("BenchmarkCore: Generated JSON: %s", json_result.c_str()); // Uncomment to debug JSON
 
     return json_result;
-}
-
-bool BenchmarkCore::isDeviceCoolEnough() {
-    if (android_get_device_api_level() < 30) return true;
-
-    void* libandroid = dlopen("libandroid.so", RTLD_NOW);
-    if (!libandroid) return true;
-
-    auto acquireManager = (AThermal_acquireManager_t)dlsym(libandroid, "AThermal_acquireManager");
-    auto getCurrentStatus = (AThermal_getCurrentThermalStatus_t)dlsym(libandroid, "AThermal_getCurrentThermalStatus");
-    auto releaseManager = (AThermal_releaseManager_t)dlsym(libandroid, "AThermal_releaseManager");
-
-    if (!acquireManager || !getCurrentStatus || !releaseManager) {
-        dlclose(libandroid);
-        return true;
-    }
-
-    void* thermalManager = acquireManager();
-    if (!thermalManager) {
-        dlclose(libandroid);
-        return true;
-    }
-
-    int status = getCurrentStatus(thermalManager);
-    releaseManager(thermalManager);
-    dlclose(libandroid);
-
-    LOGI("Current thermal status: %d", status);
-    return (status < ATHERMAL_STATUS_LIGHT);
 }

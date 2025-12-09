@@ -12,11 +12,6 @@
 #define LOG_TAG "PerformicCPU"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 
-// Constants for workloads
-constexpr int MANDELBROT_SIZE = 500;
-constexpr int MANDELBROT_ITER = 5000;
-
-
 CpuBenchmark::Scores CpuBenchmark::runFullSuite() {
     for (int i = 0; i < WARMUP_ITERATIONS; ++i){
         float resF = performMatrixMultiplication(); DoNotOptimize(resF);
@@ -24,7 +19,6 @@ CpuBenchmark::Scores CpuBenchmark::runFullSuite() {
         bool resL = performLUDecomposition();       DoNotOptimize(resL);
         double resC = performDataCompression();     DoNotOptimize(resC);
     }
-    LOGD("--- STARTING REALTIME STABILITY SUITE ---");
 
     std::vector<double> singleHistory;
     std::vector<double> multiHistory;
@@ -35,7 +29,7 @@ CpuBenchmark::Scores CpuBenchmark::runFullSuite() {
     double refCompress = 128.0;
 
     for (int i = 0; i < STABILITY_ITERATIONS; ++i) {
-        // --- A. Float ---
+        //float matrix mult
         auto startF = std::chrono::high_resolution_clock::now();
         ClobberMemory();
         float resF = performMatrixMultiplication();
@@ -43,7 +37,7 @@ CpuBenchmark::Scores CpuBenchmark::runFullSuite() {
         auto endF = std::chrono::high_resolution_clock::now();
         double timeF = std::chrono::duration<double, std::milli>(endF - startF).count();
 
-        // --- B. Integer ---
+        // int hashing
         auto startI = std::chrono::high_resolution_clock::now();
         ClobberMemory();
         long resI = performIntegerWorkload();
@@ -51,7 +45,7 @@ CpuBenchmark::Scores CpuBenchmark::runFullSuite() {
         auto endI = std::chrono::high_resolution_clock::now();
         double timeI = std::chrono::duration<double, std::milli>(endI - startI).count();
 
-        // --- C. LU Decomp ---
+        // lu decomp
         auto startL = std::chrono::high_resolution_clock::now();
         ClobberMemory();
         bool resL = performLUDecomposition();
@@ -59,7 +53,7 @@ CpuBenchmark::Scores CpuBenchmark::runFullSuite() {
         auto endL = std::chrono::high_resolution_clock::now();
         double timeL = std::chrono::duration<double, std::milli>(endL - startL).count();
 
-        // --- D. Compression ---
+        //compresstion
         auto startC = std::chrono::high_resolution_clock::now();
         ClobberMemory();
         double resC = performDataCompression();
@@ -67,24 +61,21 @@ CpuBenchmark::Scores CpuBenchmark::runFullSuite() {
         auto endC = std::chrono::high_resolution_clock::now();
         double timeC = std::chrono::duration<double, std::milli>(endC - startC).count();
 
-        // --- Calculate Score for this Iteration ---
-        // Avoid division by zero
+        //we calculate the tests by normalizing
+        //avoid / by 0
         double r1 = refFloat / std::max(timeF, 0.001);
         double r2 = refInt / std::max(timeI, 0.001);
         double r3 = refLu / std::max(timeL, 0.001);
         double r4 = refCompress / std::max(timeC, 0.001);
 
-        // Geometric Mean of the 4 tests
+        //media geometrica
         double iterGeoMean = std::pow(r1 * r2 * r3 * r4, 0.25);
-        double iterScore = iterGeoMean * 1000.0; // Scale to nice number
+        double iterScore = iterGeoMean * 1000.0;
 
         singleHistory.push_back(iterScore);
-
-        // Optional: Small sleep to allow thermal regulation to update slightly?
-        // usually not needed if workloads are heavy enough.
     }
 
-    // Final Single Score = Average of the history
+    //final score = avg of the history
     double avgSingleScore = 0.0;
     if (!singleHistory.empty()) {
         double sum = std::accumulate(singleHistory.begin(), singleHistory.end(), 0.0);
@@ -92,13 +83,11 @@ CpuBenchmark::Scores CpuBenchmark::runFullSuite() {
     }
 
 
-    // ==========================================
-    // 2. MULTI CORE STABILITY LOOP
-    // ==========================================
+
     unsigned int numCores = std::thread::hardware_concurrency();
     if (numCores == 0) numCores = 4;
 
-    double refMulti = 14395.0; // Reference time for 1 multi-core iteration
+    double refMulti = 14395.0;
 
     for (int iter = 0; iter < STABILITY_ITERATIONS; ++iter) {
         auto start = std::chrono::high_resolution_clock::now();
@@ -113,7 +102,6 @@ CpuBenchmark::Scores CpuBenchmark::runFullSuite() {
         auto end = std::chrono::high_resolution_clock::now();
         double timeMulti = std::chrono::duration<double, std::milli>(end - start).count();
 
-        // Calculate Score
         double rMulti = refMulti / std::max(timeMulti, 0.001);
         double iterScore = rMulti * 1000.0;
 
@@ -126,13 +114,10 @@ CpuBenchmark::Scores CpuBenchmark::runFullSuite() {
         avgMultiScore = sum / multiHistory.size();
     }
 
-    // Return the struct with vectors filled
     return {avgSingleScore, avgMultiScore, singleHistory, multiHistory};
 }
 
-// ---------------------------------------------------------
-// WORKLOAD FUNCTIONS (UNCHANGED)
-// ---------------------------------------------------------
+
 
 void CpuBenchmark::runThreadedWorkload() {
     double res = performMandelbrot();

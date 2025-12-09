@@ -27,6 +27,8 @@ private:
     static constexpr int INT_ARRAY_SIZE = 25000000;
     static constexpr int LU_MATRIX_SIZE = 500;
 
+    static constexpr int MANDELBROT_SIZE = 500;
+    static constexpr int MANDELBROT_ITER = 5000;
     float performMatrixMultiplication();
     long performIntegerWorkload();
     bool performLUDecomposition();
