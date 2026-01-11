@@ -20,7 +20,7 @@ public:
     Scores runFullSuite();
 
 private:
-    static constexpr int STABILITY_ITERATIONS = 30;
+    static constexpr int STABILITY_ITERATIONS = 15;
     static constexpr int WARMUP_ITERATIONS = 5;
     static constexpr int COMPRESSION_SIZE = 1000000;
     static constexpr int MATRIX_SIZE = 300;

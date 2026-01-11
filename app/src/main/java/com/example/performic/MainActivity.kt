@@ -120,7 +120,17 @@ class MainActivity : AppCompatActivity() {
 
         fun d(v: Double?) = v ?: 0.0
 
-        // 1. SET TEXT SCORES
+        // CALCULATE OVERALL SCORE (Weighted Average)
+        // Weights: Single-Core 20%, Multi-Core 35%, RAM 20%, GPU 25%
+        val overallScore = (d(cpu.singleCore) * 0.20) +
+                (d(cpu.multiCore) * 0.35) +
+                (d(cpu.ramScore) * 0.20) +
+                (gpu * 0.25)
+
+        // 1. SET OVERALL SCORE (TOP OF PAGE)
+        binding.resOverallScore.text = "%.0f".format(overallScore)
+
+        // 2. SET INDIVIDUAL TEXT SCORES
         binding.resCpuSingle.text = "%.0f".format(d(cpu.singleCore))
         binding.resCpuMulti.text = "%.0f".format(d(cpu.multiCore))
         binding.resMemScore.text = "%.0f".format(d(cpu.ramScore))
@@ -129,33 +139,33 @@ class MainActivity : AppCompatActivity() {
         binding.resL2.text = "%.2f GB/s".format(d(cpu.l2GBs))
         binding.resGpuScore.text = "%.0f".format(gpu)
 
-        // 2. SET PROGRESS BARS
+        // 3. SET PROGRESS BARS
         binding.progCpuSingle.progress = ((d(cpu.singleCore) / 2000.0) * 100).toInt().coerceIn(0, 100)
         binding.progCpuMulti.progress = ((d(cpu.multiCore) / 10000.0) * 100).toInt().coerceIn(0, 100)
         binding.progGpu.progress = ((gpu / 5000.0) * 100).toInt().coerceIn(0, 100)
 
-        // 3. SET THERMAL TEXT
+        // 4. SET THERMAL TEXT
         val startTemp = thermal.firstOrNull()?.temperature ?: 0f
         val endTemp = thermal.lastOrNull()?.temperature ?: 0f
         binding.resTempStart.text = "%.1f°".format(startTemp)
         binding.resTempPeak.text = "%.1f°".format(endTemp)
         binding.resTempRise.text = "+%.1f°".format(endTemp - startTemp)
 
-        // 4. SETUP GRAPHS (The Important Part)
+        // 5. SETUP GRAPHS
         try {
-            // A. Single Core Graph (Using REAL data from C++)
+            // A. Single Core Graph
             val singleData = if (cpu.singleCoreHistory.isNotEmpty()) cpu.singleCoreHistory else listOf(d(cpu.singleCore))
             setupChart(binding.chartCpu, singleData, "Single-Core Stability", "#00E5FF")
 
-            // B. Multi Core Graph (Using REAL data from C++)
+            // B. Multi Core Graph
             val multiData = if (cpu.multiCoreHistory.isNotEmpty()) cpu.multiCoreHistory else listOf(d(cpu.multiCore))
             setupChart(binding.chartCpuMulti, multiData, "Multi-Core Stability", "#AA00FF")
 
-            // C. GPU FPS Graph (Using REAL captured FPS)
+            // C. GPU FPS Graph
             val fpsData = if (gpuFpsHistory.isNotEmpty()) gpuFpsHistory else listOf(gpu / 100.0)
             setupChart(binding.chartGpuFps, fpsData, "GPU FPS", "#00E676")
 
-            // D. Thermal Graph (Using REAL sensor data)
+            // D. Thermal Graph
             val tempData = thermal.map { it.temperature.toDouble() }
             setupChart(binding.chartThermal, tempData, "Temperature (°C)", "#FF5252")
 

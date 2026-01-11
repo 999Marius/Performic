@@ -206,7 +206,7 @@ double GpuBenchmark::run(ANativeWindow* window, JNIEnv* env, jobject callbackObj
     double avgFps = (double)frameCount / (elapsedMs / 1000.0);
     // Log the final results. The score is just the average FPS multiplied by 100.
     LOGD("Benchmark complete - Avg FPS: %.2f, Score: %.2f", avgFps, avgFps * 100.0);
-    return avgFps * 100.0; // Return the final score.
+    return avgFps * 10.0; // Return the final score.
 }
 
 bool GpuBenchmark::initEGL(ANativeWindow* window) {

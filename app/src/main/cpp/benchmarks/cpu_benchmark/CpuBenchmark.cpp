@@ -9,6 +9,7 @@
 #include <android/log.h>
 #include <numeric>
 
+
 #define LOG_TAG "PerformicCPU"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 
@@ -90,22 +91,29 @@ CpuBenchmark::Scores CpuBenchmark::runFullSuite() {
     double refMulti = 14395.0;
 
     for (int iter = 0; iter < STABILITY_ITERATIONS; ++iter) {
-        auto start = std::chrono::high_resolution_clock::now();
+        std::vector<double> subIterations;
 
-        std::vector<std::thread> threads;
-        threads.reserve(numCores);
-        for (unsigned int i = 0; i < numCores; ++i) {
-            threads.emplace_back(&CpuBenchmark::runThreadedWorkload, this);
+        for (int sub = 0; sub < 5; ++sub) {
+            auto start = std::chrono::high_resolution_clock::now();
+
+            std::vector<std::thread> threads;
+            threads.reserve(numCores);
+            for (unsigned int i = 0; i < numCores; ++i) {
+                threads.emplace_back(&CpuBenchmark::runThreadedWorkload, this);
+            }
+            for (auto& t : threads) { if (t.joinable()) t.join(); }
+
+            auto end = std::chrono::high_resolution_clock::now();
+            double timeMulti = std::chrono::duration<double, std::milli>(end - start).count();
+
+            double rMulti = refMulti / std::max(timeMulti, 0.001);
+            subIterations.push_back(rMulti * 1000.0);
         }
-        for (auto& t : threads) { if (t.joinable()) t.join(); }
 
-        auto end = std::chrono::high_resolution_clock::now();
-        double timeMulti = std::chrono::duration<double, std::milli>(end - start).count();
-
-        double rMulti = refMulti / std::max(timeMulti, 0.001);
-        double iterScore = rMulti * 1000.0;
-
-        multiHistory.push_back(iterScore);
+        // Use median of the 3 runs (most stable measurement)
+        double sum = std::accumulate(subIterations.begin(), subIterations.end(), 0.0);
+        double avgScore = sum / subIterations.size();
+        multiHistory.push_back(avgScore);
     }
 
     double avgMultiScore = 0.0;
